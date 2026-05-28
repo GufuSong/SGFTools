@@ -11,15 +11,15 @@ public class SGFToolsRuntime : ModuleRules
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
-				"Core"
+				"Core",
+				"CoreUObject",
+				"Engine"
 			}
 		);
 
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
-				"CoreUObject",
-				"Engine"
 			}
 		);
 	}

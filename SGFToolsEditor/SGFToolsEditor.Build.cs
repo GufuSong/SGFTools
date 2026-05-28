@@ -27,6 +27,7 @@ public class SGFToolsEditor : ModuleRules
 				"AssetTools",
 				"AssetRegistry",
 				"ContentBrowser",
+				"MaterialEditor",
 				"SGFToolsRuntime"
 			}
 		);
