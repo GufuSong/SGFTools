@@ -1,0 +1,42 @@
+// 松谷福通用材质函数库
+
+#pragma once
+
+struct Str_SongGuFuFunLibrary_BasicGeneral
+{
+    float Test()
+    {
+        return 0.2;
+    }
+    
+    float2 SampleSequenceUV(float InColumns, float InRows, float2 InUV, float Frame)
+    {
+        /* 1. 添加Frame 超出限制至循环播放功能
+           2. 添加 通过时间驱动序列帧 功能
+           3. 添加反转 序列帧读取顺序功能 
+           4. 添加 Motion Vector 支持
+        */
+        
+        
+        float Columns = max(InColumns, 1.0);
+        float Rows = max(InRows, 1.0);
+        
+        float TotalTrames = Columns * Rows;
+        
+        //限制帧范围
+        float FrameIndex = clamp(floor(Frame), 0.0, TotalTrames - 1.0);
+        
+        float FrameX = fmod(FrameIndex, Columns);
+        float FrameY = floor(FrameIndex / Columns);
+        
+        float2 CellSize = float2(1.0 / Columns, 1.0 / Rows);
+        
+        //当前帧内部UV
+        float2 LocalUV = frac(InUV);
+        
+        //真实UV
+        return LocalUV * CellSize + float2(FrameX, FrameY) * CellSize;
+       
+    }
+    
+} SongGuFuFunLibrary_BasicGeneral;
