@@ -5,6 +5,7 @@
 #include "DetailCategoryBuilder.h"
 #include "DetailLayoutBuilder.h"
 #include "DetailWidgetRow.h"
+#include "Editor.h"
 #include "EditorSupportDelegates.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "IDetailGroup.h"
@@ -16,17 +17,20 @@
 #include "Input/Reply.h"
 #include "Material/SGFToolsMaterialInstance.h"
 #include "MaterialEditor/DEditorParameterValue.h"
+#include "MaterialEditor/DEditorStaticSwitchParameterValue.h"
 #include "MaterialEditor/MaterialEditorInstanceConstant.h"
 #include "MaterialEditorModule.h"
 #include "MaterialPropertyHelpers.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceConstant.h"
+#include "Containers/Ticker.h"
 #include "Misc/Optional.h"
 #include "PropertyEditorModule.h"
 #include "PropertyHandle.h"
 #include "ScopedTransaction.h"
 #include "Styling/AppStyle.h"
 #include "Toolkits/AssetEditorToolkit.h"
+#include "UObject/UObjectGlobals.h"
 #include "UObject/UnrealType.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "Widgets/Input/SButton.h"
@@ -704,6 +708,142 @@ namespace
 		}
 
 	private:
+		void BindHierarchyRefreshDelegates()
+		{
+			if (!ObjectPropertyChangedHandle.IsValid())
+			{
+				ObjectPropertyChangedHandle = FCoreUObjectDelegates::OnObjectPropertyChanged.AddSP(
+					AsShared(),
+					&FSGFToolsHierarchyDetailsExtension::HandleObjectPropertyChanged);
+			}
+
+			if (!PostUndoRedoHandle.IsValid())
+			{
+				PostUndoRedoHandle = FEditorDelegates::PostUndoRedo.AddSP(
+					AsShared(),
+					&FSGFToolsHierarchyDetailsExtension::HandlePostUndoRedo);
+			}
+		}
+
+		void UnbindHierarchyRefreshDelegates()
+		{
+			if (ObjectPropertyChangedHandle.IsValid())
+			{
+				FCoreUObjectDelegates::OnObjectPropertyChanged.Remove(ObjectPropertyChangedHandle);
+				ObjectPropertyChangedHandle.Reset();
+			}
+
+			if (PostUndoRedoHandle.IsValid())
+			{
+				FEditorDelegates::PostUndoRedo.Remove(PostUndoRedoHandle);
+				PostUndoRedoHandle.Reset();
+			}
+
+			CancelPendingHierarchyRefresh();
+		}
+
+		void HandleObjectPropertyChanged(UObject* Object, FPropertyChangedEvent& PropertyChangedEvent)
+		{
+			if (bClosed || Object != MaterialInstance.Get())
+			{
+				return;
+			}
+
+			FProperty* ChangedProperty = PropertyChangedEvent.Property;
+			const UClass* OwnerClass = ChangedProperty ? ChangedProperty->GetOwnerClass() : nullptr;
+			const bool bStaticSwitchChanged = OwnerClass && OwnerClass->IsChildOf(UDEditorStaticSwitchParameterValue::StaticClass());
+
+			// Null property events are used by parameter override changes and SGF bulk operations.
+			if (!ChangedProperty || bStaticSwitchChanged)
+			{
+				RequestHierarchyRefresh();
+			}
+		}
+
+		void HandlePostUndoRedo()
+		{
+			RequestHierarchyRefresh();
+		}
+
+		void RequestHierarchyRefresh()
+		{
+			if (bClosed || PendingHierarchyRefreshHandle.IsValid() || !HierarchyDetailsView.IsValid())
+			{
+				return;
+			}
+
+			TWeakPtr<FSGFToolsHierarchyDetailsExtension> WeakExtension = AsShared();
+			PendingHierarchyRefreshHandle = FTSTicker::GetCoreTicker().AddTicker(
+				TEXT("SGFToolsHierarchyDetailsRefresh"),
+				0.0f,
+				[WeakExtension](float)
+				{
+					if (TSharedPtr<FSGFToolsHierarchyDetailsExtension> Extension = WeakExtension.Pin())
+					{
+						Extension->PendingHierarchyRefreshHandle.Reset();
+						Extension->RefreshVisibleExpressions();
+					}
+
+					return false;
+				});
+		}
+
+		void CancelPendingHierarchyRefresh()
+		{
+			if (PendingHierarchyRefreshHandle.IsValid())
+			{
+				FTSTicker::RemoveTicker(PendingHierarchyRefreshHandle);
+				PendingHierarchyRefreshHandle.Reset();
+			}
+		}
+
+		void RefreshVisibleExpressions()
+		{
+			if (bClosed)
+			{
+				return;
+			}
+
+			TSharedPtr<IMaterialEditor> Editor = MaterialEditor.Pin();
+			TSharedPtr<IDetailsView> DetailsView = HierarchyDetailsView.Pin();
+			if (!Editor.IsValid() || !DetailsView.IsValid())
+			{
+				return;
+			}
+
+			UMaterialEditorInstanceConstant* MaterialEditorInstance = FindMaterialEditorInstance(Editor.ToSharedRef());
+			if (!MaterialEditorInstance || !MaterialEditorInstance->Parent || !MaterialEditorInstance->SourceInstance)
+			{
+				return;
+			}
+
+			TArray<FMaterialParameterInfo> NewVisibleExpressions;
+			IMaterialEditorModule& MaterialEditorModule = FModuleManager::LoadModuleChecked<IMaterialEditorModule>(TEXT("MaterialEditor"));
+			MaterialEditorModule.GetVisibleMaterialParameters(
+				MaterialEditorInstance->Parent->GetMaterial(),
+				MaterialEditorInstance->SourceInstance,
+				NewVisibleExpressions);
+
+			bool bVisibilityChanged = MaterialEditorInstance->VisibleExpressions.Num() != NewVisibleExpressions.Num();
+			if (!bVisibilityChanged)
+			{
+				for (const FMaterialParameterInfo& ParameterInfo : MaterialEditorInstance->VisibleExpressions)
+				{
+					if (!NewVisibleExpressions.Contains(ParameterInfo))
+					{
+						bVisibilityChanged = true;
+						break;
+					}
+				}
+			}
+
+			if (bVisibilityChanged)
+			{
+				MaterialEditorInstance->VisibleExpressions = MoveTemp(NewVisibleExpressions);
+				DetailsView->ForceRefresh();
+			}
+		}
+
 		// 行为：确保页签生成器已注册；作用：在打开页签前补注册层级详情页签；输出：无返回值。
 		void EnsureTabSpawnerRegistered()
 		{
@@ -767,11 +907,14 @@ namespace
 			PreviousMaterialEditorDetailsView = MaterialEditorInstance->DetailsView;
 			MaterialEditorInstance->DetailsView = DetailsView;
 			HierarchyDetailsView = DetailsView;
+			BindHierarchyRefreshDelegates();
 		}
 
 		// 行为：还原材质实例详情刷新视图；作用：在层级详情页签关闭或扩展关闭时把原生 DetailsView 刷新入口交还给材质实例编辑器；输出：无返回值。
 		void RestoreMaterialEditorDetailsView()
 		{
+			UnbindHierarchyRefreshDelegates();
+
 			TSharedPtr<IDetailsView> PinnedHierarchyDetailsView = HierarchyDetailsView.Pin();
 			if (PinnedHierarchyDetailsView.IsValid())
 			{
@@ -889,6 +1032,9 @@ namespace
 		FDelegateHandle RegisterTabSpawnersHandle;
 		FDelegateHandle UnregisterTabSpawnersHandle;
 		FDelegateHandle EditorClosedHandle;
+		FDelegateHandle ObjectPropertyChangedHandle;
+		FDelegateHandle PostUndoRedoHandle;
+		FTSTicker::FDelegateHandle PendingHierarchyRefreshHandle;
 		bool bRegisteredTabSpawner = false;
 		bool bClosed = false;
 	};
