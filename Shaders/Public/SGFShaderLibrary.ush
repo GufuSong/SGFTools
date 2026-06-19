@@ -9,6 +9,7 @@ struct Str_SongGuFuFunLibrary_BasicGeneral
         return 0.2;
     }
 
+
     // 基础SampleSequenceUV
     float2 SampleSequenceUV(float InColumns, float InRows, float2 InUV, float Frame)
     {
@@ -75,5 +76,70 @@ struct Str_SongGuFuFunLibrary_BasicGeneral
         return LocalUV * CellSize + float2(FrameX, FrameY) * CellSize;
     }
     
+    
+    // 基础光照模拟,无高光
+    float3 SimulationLight(
+        float3 WorldPosition,
+        float3 Normal,
+        float3 LightPosition,
+        float3 LightColor,
+        float LightIntensity,
+        float LightRadius,
+        float LightExponent,
+        float Ambient)  
+    {
+        float3 N = normalize(Normal);
+
+        float3 ToLight = LightPosition - WorldPosition;
+        float Dist = length(ToLight);
+        float3 L = ToLight / max(Dist, 0.0001);
+
+        float NdotL = saturate(dot(N, L));
+
+        float Range01 = saturate(1.0 - Dist / max(LightRadius, 0.0001));
+        float Attenuation = pow(Range01, max(LightExponent, 0.0001));
+
+        float LightAmount = NdotL * Attenuation * LightIntensity;
+
+        return LightColor * (LightAmount + Ambient);
+    }
+
+    // 光照模拟_高光
+    float3 SimulationLight(
+        float3 WorldPosition,
+        float3 Normal,
+        float3 LightPosition,
+        float3 LightColor,
+        float LightIntensity,
+        float LightRadius,
+        float LightExponent,
+        float Ambient,
+        float3 CameraPosition,
+        float SpecularIntensity,
+        float SpecularPower)
+    {
+        float3 N = normalize(Normal);
+
+        float3 ToLight = LightPosition - WorldPosition;
+        float Dist = length(ToLight);
+        float3 L = ToLight / max(Dist, 0.0001);
+        float3 V = normalize(CameraPosition - WorldPosition);
+        float3 H = normalize(L + V);
+
+        float NdotL = saturate(dot(N, L));
+        float NdotH = saturate(dot(N, H));
+
+        float Range01 = saturate(1.0 - Dist / max(LightRadius, 0.0001));
+        float Attenuation = pow(Range01, max(LightExponent, 0.0001));
+
+        float DiffuseAmount = NdotL * Attenuation * LightIntensity;
+        float SpecularAmount = pow(NdotH, max(SpecularPower, 0.0001))
+            * SpecularIntensity
+            * NdotL
+            * Attenuation
+            * LightIntensity;
+
+        return LightColor * (DiffuseAmount + SpecularAmount + Ambient);
+    }
     
 } SongGuFuFunLibrary_BasicGeneral;

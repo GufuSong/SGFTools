@@ -147,7 +147,7 @@ void FSGFToolsEditorModule::RegisterMenus()
 	// 行为：构建创建菜单动态入口；作用：向材质右键菜单添加创建 SGF 材质实例命令；输出：无返回值。
 	Section.AddDynamicEntry("SGFTools_CreateMaterialInstance_Dynamic", FNewToolMenuSectionDelegate::CreateLambda([](FToolMenuSection& InSection)
 	{
-		const TAttribute<FText> Label = LOCTEXT("CreateSGFToolsMaterialInstance", "创建 SGF Material Instance");
+		const TAttribute<FText> Label = LOCTEXT("CreateSGFToolsMaterialInstance", "Create SGF Material Instance");
 		const TAttribute<FText> ToolTip = LOCTEXT("CreateSGFToolsMaterialInstanceTooltip", "创建一个 SGFTools 自定义 Material Instance，并把当前选中的材质设为 Parent。");
 		const FSlateIcon Icon = FSlateIcon(FAppStyle::GetAppStyleSetName(), "ClassIcon.MaterialInstanceActor");
 		const FToolMenuExecuteAction UIAction = FToolMenuExecuteAction::CreateStatic(&ExecuteCreateSGFToolsMaterialInstance);
