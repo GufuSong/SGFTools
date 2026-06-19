@@ -25,13 +25,8 @@ public class SGFToolsEditor : ModuleRules
 				"Slate",
 				"SlateCore",
 				"UnrealEd",
-				"ToolMenus",
-				"AssetTools",
-				"AssetRegistry",
-				"ContentBrowser",
 				"MaterialEditor",
-				"PropertyEditor",
-				"SGFToolsRuntime"
+				"PropertyEditor"
 			}
 		);
 	}

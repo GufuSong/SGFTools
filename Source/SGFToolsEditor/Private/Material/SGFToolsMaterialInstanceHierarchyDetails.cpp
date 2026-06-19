@@ -15,7 +15,6 @@
 #include "IMaterialEditor.h"
 #include "IPropertyUtilities.h"
 #include "Input/Reply.h"
-#include "Material/SGFToolsMaterialInstance.h"
 #include "MaterialEditor/DEditorParameterValue.h"
 #include "MaterialEditor/DEditorStaticSwitchParameterValue.h"
 #include "MaterialEditor/MaterialEditorInstanceConstant.h"
@@ -45,6 +44,10 @@
 namespace SGFTools::MaterialInstanceHierarchyDetails
 {
 	const FName TabId(TEXT("SGFTools_HierarchyDetails"));
+	const FName NativeDetailsTabId(TEXT("MaterialInstanceEditor_MaterialProperties"));
+
+	static void OpenHierarchyDetailsTabForEditor(const TSharedRef<IMaterialEditor>& MaterialEditor);
+	static bool TryOpenHierarchyDetailsTabForEditor(const TSharedRef<IMaterialEditor>& MaterialEditor);
 }
 
 namespace
@@ -57,8 +60,16 @@ namespace
 	};
 
 	FDelegateHandle GMaterialInstanceEditorOpenedHandle;
-	TArray<TWeakObjectPtr<USGFToolsMaterialInstance>> GPendingMaterialInstances;
 	TArray<TSharedPtr<FSGFToolsHierarchyDetailsExtension>> GActiveExtensions;
+
+	struct FPendingHierarchyDetailsOpenRequest
+	{
+		TWeakPtr<IMaterialEditor> MaterialEditor;
+		FTSTicker::FDelegateHandle TickerHandle;
+		int32 AttemptsRemaining = 30;
+	};
+
+	TArray<TSharedPtr<FPendingHierarchyDetailsOpenRequest>> GPendingOpenRequests;
 
 	// 行为：返回隐藏参数显示状态；作用：为材质属性帮助器提供不显示隐藏参数的委托；输出：通过引用写出 false。
 	void GetShowHiddenParameters(bool& bShowHiddenParameters)
@@ -150,8 +161,8 @@ namespace
 		return nullptr;
 	}
 
-	// 行为：查找 SGF 材质实例；作用：从材质编辑器当前编辑对象中取出 USGFToolsMaterialInstance；输出：SGF 材质实例指针，失败时为空。
-	USGFToolsMaterialInstance* FindSGFToolsMaterialInstance(const TSharedRef<IMaterialEditor>& MaterialEditor)
+	// 查找当前材质实例编辑器正在编辑的原生材质实例资产。
+	UMaterialInstanceConstant* FindMaterialInstance(const TSharedRef<IMaterialEditor>& MaterialEditor)
 	{
 		const TArray<UObject*>* EditingObjects = MaterialEditor->GetObjectsCurrentlyBeingEdited();
 		if (!EditingObjects)
@@ -161,13 +172,111 @@ namespace
 
 		for (UObject* EditingObject : *EditingObjects)
 		{
-			if (USGFToolsMaterialInstance* MaterialInstance = Cast<USGFToolsMaterialInstance>(EditingObject))
+			if (UMaterialInstanceConstant* MaterialInstance = Cast<UMaterialInstanceConstant>(EditingObject))
 			{
 				return MaterialInstance;
+			}
+
+			if (UMaterialEditorInstanceConstant* MaterialEditorInstance = Cast<UMaterialEditorInstanceConstant>(EditingObject))
+			{
+				if (MaterialEditorInstance->SourceInstance)
+				{
+					return MaterialEditorInstance->SourceInstance;
+				}
 			}
 		}
 
 		return nullptr;
+	}
+
+	void CancelPendingOpenRequests()
+	{
+		for (const TSharedPtr<FPendingHierarchyDetailsOpenRequest>& Request : GPendingOpenRequests)
+		{
+			if (Request.IsValid() && Request->TickerHandle.IsValid())
+			{
+				FTSTicker::RemoveTicker(Request->TickerHandle);
+				Request->TickerHandle.Reset();
+			}
+		}
+
+		GPendingOpenRequests.Empty();
+	}
+
+	void FinishPendingOpenRequest(const TSharedPtr<FPendingHierarchyDetailsOpenRequest>& Request)
+	{
+		if (Request.IsValid())
+		{
+			Request->TickerHandle.Reset();
+		}
+
+		GPendingOpenRequests.Remove(Request);
+	}
+
+	bool TickPendingOpenRequest(const TSharedPtr<FPendingHierarchyDetailsOpenRequest> Request)
+	{
+		if (!Request.IsValid())
+		{
+			return false;
+		}
+
+		TSharedPtr<IMaterialEditor> MaterialEditor = Request->MaterialEditor.Pin();
+		if (!MaterialEditor.IsValid())
+		{
+			FinishPendingOpenRequest(Request);
+			return false;
+		}
+
+		if (MaterialEditor->GetTabManager().IsValid()
+			&& FindMaterialInstance(MaterialEditor.ToSharedRef())
+			&& FindMaterialEditorInstance(MaterialEditor.ToSharedRef()))
+		{
+			if (SGFTools::MaterialInstanceHierarchyDetails::TryOpenHierarchyDetailsTabForEditor(MaterialEditor.ToSharedRef()))
+			{
+				FinishPendingOpenRequest(Request);
+				return false;
+			}
+		}
+
+		--Request->AttemptsRemaining;
+		if (Request->AttemptsRemaining <= 0)
+		{
+			FinishPendingOpenRequest(Request);
+			return false;
+		}
+
+		return true;
+	}
+
+	void ScheduleHierarchyDetailsOpen(TWeakPtr<IMaterialEditor> WeakMaterialEditor)
+	{
+		TSharedPtr<IMaterialEditor> MaterialEditor = WeakMaterialEditor.Pin();
+		if (!MaterialEditor.IsValid())
+		{
+			return;
+		}
+
+		for (const TSharedPtr<FPendingHierarchyDetailsOpenRequest>& Request : GPendingOpenRequests)
+		{
+			if (Request.IsValid() && Request->MaterialEditor.Pin() == MaterialEditor)
+			{
+				return;
+			}
+		}
+
+		TSharedRef<FPendingHierarchyDetailsOpenRequest> Request = MakeShared<FPendingHierarchyDetailsOpenRequest>();
+		Request->MaterialEditor = MaterialEditor;
+
+		TSharedPtr<FPendingHierarchyDetailsOpenRequest> SharedRequest = Request;
+		Request->TickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+			TEXT("SGFToolsHierarchyDetailsOpen"),
+			0.0f,
+			[SharedRequest](float)
+			{
+				return TickPendingOpenRequest(SharedRequest);
+			});
+
+		GPendingOpenRequests.Add(Request);
 	}
 
 	class FSGFToolsHierarchyMaterialInstanceDetails : public IDetailCustomization
@@ -643,7 +752,7 @@ namespace
 	{
 	public:
 		// 行为：构造层级详情扩展对象；作用：绑定材质编辑器、材质实例和共享筛选状态；输出：无返回值，生成扩展对象。
-		FSGFToolsHierarchyDetailsExtension(TSharedRef<IMaterialEditor> InMaterialEditor, USGFToolsMaterialInstance* InMaterialInstance)
+		FSGFToolsHierarchyDetailsExtension(TSharedRef<IMaterialEditor> InMaterialEditor, UMaterialInstanceConstant* InMaterialInstance)
 			: MaterialEditor(InMaterialEditor)
 			, MaterialInstance(InMaterialInstance)
 			, State(MakeShared<FSGFToolsHierarchyDetailsState>())
@@ -674,17 +783,36 @@ namespace
 		}
 
 		// 行为：打开层级详情页签；作用：确保页签注册后在当前材质编辑器中唤起详情面板；输出：无返回值。
-		void OpenTab()
+		bool OpenTab()
 		{
-			EnsureTabSpawnerRegistered();
-
 			if (TSharedPtr<IMaterialEditor> Editor = MaterialEditor.Pin())
 			{
 				if (TSharedPtr<FTabManager> TabManager = Editor->GetTabManager())
 				{
-					TabManager->TryInvokeTab(SGFTools::MaterialInstanceHierarchyDetails::TabId);
+					EnsureTabSpawnerRegistered();
+
+					if (TabManager->FindExistingLiveTab(SGFTools::MaterialInstanceHierarchyDetails::TabId).IsValid())
+					{
+						return TabManager->TryInvokeTab(SGFTools::MaterialInstanceHierarchyDetails::TabId).IsValid();
+					}
+
+					const FTabManager::FLiveTabSearch SearchNativeDetailsTab(SGFTools::MaterialInstanceHierarchyDetails::NativeDetailsTabId);
+					TabManager->InsertNewDocumentTab(
+						SGFTools::MaterialInstanceHierarchyDetails::NativeDetailsTabId,
+						SGFTools::MaterialInstanceHierarchyDetails::TabId,
+						SearchNativeDetailsTab,
+						CreateHierarchyDetailsTab());
+
+					if (TabManager->FindExistingLiveTab(SGFTools::MaterialInstanceHierarchyDetails::TabId).IsValid())
+					{
+						return true;
+					}
+
+					return TabManager->TryInvokeTab(SGFTools::MaterialInstanceHierarchyDetails::TabId).IsValid();
 				}
 			}
+
+			return false;
 		}
 
 		// 行为：关闭扩展对象；作用：移除编辑器事件绑定并注销层级详情页签；输出：无返回值。
@@ -943,7 +1071,13 @@ namespace
 		// 行为：生成层级详情页签；作用：创建承载层级详情控件的 SDockTab；输出：页签 Widget 引用。
 		TSharedRef<SDockTab> SpawnHierarchyDetailsTab(const FSpawnTabArgs& Args)
 		{
+			return CreateHierarchyDetailsTab();
+		}
+
+		TSharedRef<SDockTab> CreateHierarchyDetailsTab()
+		{
 			TSharedRef<SDockTab> Tab = SNew(SDockTab)
+				.TabRole(ETabRole::PanelTab)
 				.Label(LOCTEXT("HierarchyDetailsTabLabel", "Hierarchy Details"))
 				[
 					SNew(SBorder)
@@ -1024,7 +1158,7 @@ namespace
 
 	private:
 		TWeakPtr<IMaterialEditor> MaterialEditor;
-		TWeakObjectPtr<USGFToolsMaterialInstance> MaterialInstance;
+		TWeakObjectPtr<UMaterialInstanceConstant> MaterialInstance;
 		TSharedPtr<FSGFToolsHierarchyDetailsState> State;
 		TWeakPtr<FTabManager> RegisteredTabManager;
 		TWeakPtr<IDetailsView> PreviousMaterialEditorDetailsView;
@@ -1049,32 +1183,16 @@ namespace
 		});
 	}
 
-	// 行为：处理材质实例编辑器打开事件；作用：把等待队列中的 SGF 材质实例绑定到刚打开的材质编辑器；输出：无返回值。
+	// 处理原生材质实例编辑器打开事件，并自动打开层级详情页签。
 	void HandleMaterialInstanceEditorOpened(TWeakPtr<IMaterialEditor> WeakMaterialEditor)
 	{
-		if (GPendingMaterialInstances.IsEmpty())
-		{
-			return;
-		}
-
-		TWeakObjectPtr<USGFToolsMaterialInstance> PendingMaterialInstance = GPendingMaterialInstances[0];
-		GPendingMaterialInstances.RemoveAt(0);
-
-		TSharedPtr<IMaterialEditor> MaterialEditor = WeakMaterialEditor.Pin();
-		if (!MaterialEditor.IsValid() || !PendingMaterialInstance.IsValid())
-		{
-			return;
-		}
-
-		TSharedRef<FSGFToolsHierarchyDetailsExtension> Extension = MakeShared<FSGFToolsHierarchyDetailsExtension>(MaterialEditor.ToSharedRef(), PendingMaterialInstance.Get());
-		Extension->Bind();
-		GActiveExtensions.Add(Extension);
+		ScheduleHierarchyDetailsOpen(WeakMaterialEditor);
 	}
 
 	// 行为：确保材质编辑器事件已注册；作用：按需监听 MaterialEditor 模块的材质实例编辑器打开事件；输出：无返回值。
 	void EnsureMaterialEditorDelegateRegistered()
 	{
-		if (GMaterialInstanceEditorOpenedHandle.IsValid() || !FModuleManager::Get().IsModuleLoaded(TEXT("MaterialEditor")))
+		if (GMaterialInstanceEditorOpenedHandle.IsValid())
 		{
 			return;
 		}
@@ -1102,7 +1220,7 @@ namespace SGFTools::MaterialInstanceHierarchyDetails
 		}
 
 		GMaterialInstanceEditorOpenedHandle.Reset();
-		GPendingMaterialInstances.Empty();
+		CancelPendingOpenRequests();
 
 		for (const TSharedPtr<FSGFToolsHierarchyDetailsExtension>& Extension : GActiveExtensions)
 		{
@@ -1115,18 +1233,9 @@ namespace SGFTools::MaterialInstanceHierarchyDetails
 		GActiveExtensions.Empty();
 	}
 
-	// 行为：排队等待材质实例编辑器；作用：记录要打开层级详情页签的 SGF 材质实例并确保事件已注册；输出：无返回值。
-	void QueueEditorForMaterialInstance(USGFToolsMaterialInstance* MaterialInstance)
-	{
-		if (MaterialInstance)
-		{
-			EnsureMaterialEditorDelegateRegistered();
-			GPendingMaterialInstances.Add(MaterialInstance);
-		}
-	}
-
+	// 复用或创建当前材质实例编辑器的层级详情扩展，并唤起页签。
 	// 行为：打开指定材质编辑器的层级详情面板；作用：复用已有扩展或创建新扩展并唤起自定义页签；输出：无返回值。
-	void OpenForMaterialEditor(const TSharedRef<IMaterialEditor>& MaterialEditor)
+	static void OpenHierarchyDetailsTabForEditor(const TSharedRef<IMaterialEditor>& MaterialEditor)
 	{
 		PruneInactiveExtensions();
 
@@ -1143,20 +1252,38 @@ namespace SGFTools::MaterialInstanceHierarchyDetails
 
 		if (!bOpened)
 		{
-			if (USGFToolsMaterialInstance* MaterialInstance = FindSGFToolsMaterialInstance(MaterialEditor))
+			if (UMaterialInstanceConstant* MaterialInstance = FindMaterialInstance(MaterialEditor))
 			{
 				// 行为：移除同实例等待项；作用：避免已打开的材质实例再次从等待队列创建扩展；输出：是否移除等待项的布尔值。
-				GPendingMaterialInstances.RemoveAll([MaterialInstance](const TWeakObjectPtr<USGFToolsMaterialInstance>& PendingMaterialInstance)
-				{
-					return !PendingMaterialInstance.IsValid() || PendingMaterialInstance.Get() == MaterialInstance;
-				});
-
 				TSharedRef<FSGFToolsHierarchyDetailsExtension> Extension = MakeShared<FSGFToolsHierarchyDetailsExtension>(MaterialEditor, MaterialInstance);
 				Extension->Bind();
 				GActiveExtensions.Add(Extension);
 				Extension->OpenTab();
 			}
 		}
+	}
+
+	static bool TryOpenHierarchyDetailsTabForEditor(const TSharedRef<IMaterialEditor>& MaterialEditor)
+	{
+		PruneInactiveExtensions();
+
+		for (const TSharedPtr<FSGFToolsHierarchyDetailsExtension>& Extension : GActiveExtensions)
+		{
+			if (Extension.IsValid() && Extension->IsForEditor(MaterialEditor))
+			{
+				return Extension->OpenTab();
+			}
+		}
+
+		if (UMaterialInstanceConstant* MaterialInstance = FindMaterialInstance(MaterialEditor))
+		{
+			TSharedRef<FSGFToolsHierarchyDetailsExtension> Extension = MakeShared<FSGFToolsHierarchyDetailsExtension>(MaterialEditor, MaterialInstance);
+			Extension->Bind();
+			GActiveExtensions.Add(Extension);
+			return Extension->OpenTab();
+		}
+
+		return false;
 	}
 }
 

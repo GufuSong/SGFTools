@@ -284,10 +284,7 @@
 /I "Editor/SceneDepthPickerMode/Public"
 /I "../Intermediate/Build/Win64/UnrealEditor/Inc/AnimationEditMode/UHT"
 /I "Editor/AnimationEditMode/Public"
-/I "H:/Unreal Projects/SongGuFu_VFX_v2/Plugins/SGFTools/Intermediate/Build/Win64/UnrealEditor/Inc/SGFToolsRuntime/UHT"
 /I "H:/Unreal Projects/SongGuFu_VFX_v2/Plugins/SGFTools/Source"
-/I "H:/Unreal Projects/SongGuFu_VFX_v2/Plugins/SGFTools/Source/SGFToolsRuntime/Public"
-/I "H:/Unreal Projects/SongGuFu_VFX_v2/Plugins/SGFTools/Intermediate/Build/Win64/UnrealEditor/Inc/SGFToolsEditor/UHT"
 /I "H:/Unreal Projects/SongGuFu_VFX_v2/Plugins/SGFTools/Source/SGFToolsEditor/Public"
 /I "H:/Unreal Projects/SongGuFu_VFX_v2/Intermediate/Build/Win64/x64/SongGuFu_VFX_v2Editor/Development/UnrealEd"
 /external:W0

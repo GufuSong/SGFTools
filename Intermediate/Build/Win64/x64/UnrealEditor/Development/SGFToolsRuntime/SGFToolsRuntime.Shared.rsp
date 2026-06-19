@@ -15,7 +15,6 @@
 /I "Runtime/CoreUObject/Public"
 /I "Runtime/CorePreciseFP/Public"
 /I "Runtime/OpenGLDrv/Public"
-/I "H:/Unreal Projects/SongGuFu_VFX_v2/Plugins/SGFTools/Intermediate/Build/Win64/UnrealEditor/Inc/SGFToolsRuntime/UHT"
 /I "H:/Unreal Projects/SongGuFu_VFX_v2/Plugins/SGFTools/Source"
 /I "H:/Unreal Projects/SongGuFu_VFX_v2/Plugins/SGFTools/Source/SGFToolsRuntime/Public"
 /I "../Intermediate/Build/Win64/UnrealEditor/Inc/Engine/UHT"

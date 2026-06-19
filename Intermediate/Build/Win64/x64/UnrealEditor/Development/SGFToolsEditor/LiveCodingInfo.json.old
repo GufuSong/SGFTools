@@ -8,6 +8,7 @@
 			"SGFToolsMaterialInstanceAssetTypeActions.cpp.obj",
 			"SGFToolsMaterialInstanceConversion.cpp.obj",
 			"SGFToolsMaterialInstanceFactory.cpp.obj",
+			"SGFToolsMaterialInstanceHierarchyDetails.cpp.obj",
 			"SGFToolsEditor.cpp.obj"
 		]
 	}
