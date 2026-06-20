@@ -845,6 +845,13 @@ namespace
 					&FSGFToolsHierarchyDetailsExtension::HandleObjectPropertyChanged);
 			}
 
+			if (!ObjectModifiedHandle.IsValid())
+			{
+				ObjectModifiedHandle = FCoreUObjectDelegates::OnObjectModified.AddSP(
+					AsShared(),
+					&FSGFToolsHierarchyDetailsExtension::HandleObjectModified);
+			}
+
 			if (!PostUndoRedoHandle.IsValid())
 			{
 				PostUndoRedoHandle = FEditorDelegates::PostUndoRedo.AddSP(
@@ -861,6 +868,12 @@ namespace
 				ObjectPropertyChangedHandle.Reset();
 			}
 
+			if (ObjectModifiedHandle.IsValid())
+			{
+				FCoreUObjectDelegates::OnObjectModified.Remove(ObjectModifiedHandle);
+				ObjectModifiedHandle.Reset();
+			}
+
 			if (PostUndoRedoHandle.IsValid())
 			{
 				FEditorDelegates::PostUndoRedo.Remove(PostUndoRedoHandle);
@@ -872,19 +885,38 @@ namespace
 
 		void HandleObjectPropertyChanged(UObject* Object, FPropertyChangedEvent& PropertyChangedEvent)
 		{
-			if (bClosed || Object != MaterialInstance.Get())
+			if (bClosed)
 			{
 				return;
 			}
 
 			FProperty* ChangedProperty = PropertyChangedEvent.Property;
 			const UClass* OwnerClass = ChangedProperty ? ChangedProperty->GetOwnerClass() : nullptr;
-			const bool bStaticSwitchChanged = OwnerClass && OwnerClass->IsChildOf(UDEditorStaticSwitchParameterValue::StaticClass());
+			const bool bStaticSwitchChanged =
+				(OwnerClass && OwnerClass->IsChildOf(UDEditorStaticSwitchParameterValue::StaticClass()))
+				|| (Object && Object->IsA(UDEditorStaticSwitchParameterValue::StaticClass()));
+			if (!IsObjectRelevantForHierarchyRefresh(Object, bStaticSwitchChanged))
+			{
+				return;
+			}
 
 			// Null property events are used by parameter override changes and SGF bulk operations.
 			if (!ChangedProperty || bStaticSwitchChanged)
 			{
-				RequestHierarchyRefresh();
+				RequestHierarchyRefresh(bStaticSwitchChanged);
+			}
+		}
+
+		void HandleObjectModified(UObject* Object)
+		{
+			if (bClosed || !Object || !Object->IsA(UDEditorStaticSwitchParameterValue::StaticClass()))
+			{
+				return;
+			}
+
+			if (IsObjectRelevantForHierarchyRefresh(Object, true))
+			{
+				RequestHierarchyRefresh(true);
 			}
 		}
 
@@ -893,9 +925,59 @@ namespace
 			RequestHierarchyRefresh();
 		}
 
-		void RequestHierarchyRefresh()
+		bool IsObjectRelevantForHierarchyRefresh(UObject* Object, bool bStaticSwitchChanged) const
 		{
-			if (bClosed || PendingHierarchyRefreshHandle.IsValid() || !HierarchyDetailsView.IsValid())
+			if (Object == MaterialInstance.Get())
+			{
+				return true;
+			}
+
+			TSharedPtr<IMaterialEditor> Editor = MaterialEditor.Pin();
+			if (!Editor.IsValid())
+			{
+				return false;
+			}
+
+			UMaterialEditorInstanceConstant* MaterialEditorInstance = FindMaterialEditorInstance(Editor.ToSharedRef());
+			if (!MaterialEditorInstance)
+			{
+				return false;
+			}
+
+			if (Object == MaterialEditorInstance)
+			{
+				return true;
+			}
+
+			UDEditorParameterValue* ChangedParameter = Cast<UDEditorParameterValue>(Object);
+			if (!ChangedParameter || !bStaticSwitchChanged)
+			{
+				return false;
+			}
+
+			for (const FEditorParameterGroup& ParameterGroup : MaterialEditorInstance->ParameterGroups)
+			{
+				for (UDEditorParameterValue* Parameter : ParameterGroup.Parameters)
+				{
+					if (Parameter == ChangedParameter)
+					{
+						return true;
+					}
+				}
+			}
+
+			return false;
+		}
+
+		void RequestHierarchyRefresh(bool bForceDetailsRefresh = false)
+		{
+			if (bClosed || !HierarchyDetailsView.IsValid())
+			{
+				return;
+			}
+
+			bForcePendingHierarchyRefresh |= bForceDetailsRefresh;
+			if (PendingHierarchyRefreshHandle.IsValid())
 			{
 				return;
 			}
@@ -908,8 +990,10 @@ namespace
 				{
 					if (TSharedPtr<FSGFToolsHierarchyDetailsExtension> Extension = WeakExtension.Pin())
 					{
+						const bool bShouldForceDetailsRefresh = Extension->bForcePendingHierarchyRefresh;
+						Extension->bForcePendingHierarchyRefresh = false;
 						Extension->PendingHierarchyRefreshHandle.Reset();
-						Extension->RefreshVisibleExpressions();
+						Extension->RefreshVisibleExpressions(bShouldForceDetailsRefresh);
 					}
 
 					return false;
@@ -923,9 +1007,10 @@ namespace
 				FTSTicker::RemoveTicker(PendingHierarchyRefreshHandle);
 				PendingHierarchyRefreshHandle.Reset();
 			}
+			bForcePendingHierarchyRefresh = false;
 		}
 
-		void RefreshVisibleExpressions()
+		void RefreshVisibleExpressions(bool bForceDetailsRefresh = false)
 		{
 			if (bClosed)
 			{
@@ -943,6 +1028,11 @@ namespace
 			if (!MaterialEditorInstance || !MaterialEditorInstance->Parent || !MaterialEditorInstance->SourceInstance)
 			{
 				return;
+			}
+
+			if (bForceDetailsRefresh)
+			{
+				MaterialEditorInstance->CopyToSourceInstance(true);
 			}
 
 			TArray<FMaterialParameterInfo> NewVisibleExpressions;
@@ -968,6 +1058,10 @@ namespace
 			if (bVisibilityChanged)
 			{
 				MaterialEditorInstance->VisibleExpressions = MoveTemp(NewVisibleExpressions);
+			}
+
+			if (bVisibilityChanged || bForceDetailsRefresh)
+			{
 				DetailsView->ForceRefresh();
 			}
 		}
@@ -1167,8 +1261,10 @@ namespace
 		FDelegateHandle UnregisterTabSpawnersHandle;
 		FDelegateHandle EditorClosedHandle;
 		FDelegateHandle ObjectPropertyChangedHandle;
+		FDelegateHandle ObjectModifiedHandle;
 		FDelegateHandle PostUndoRedoHandle;
 		FTSTicker::FDelegateHandle PendingHierarchyRefreshHandle;
+		bool bForcePendingHierarchyRefresh = false;
 		bool bRegisteredTabSpawner = false;
 		bool bClosed = false;
 	};
