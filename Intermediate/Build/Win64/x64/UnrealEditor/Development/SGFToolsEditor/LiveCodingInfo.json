@@ -1,0 +1,10 @@
+{
+	"RemapUnityFiles": 
+	{
+		"Module.SGFToolsEditor.cpp.obj": [
+			"PerModuleInline.gen.cpp.obj",
+			"SGFToolsMaterialInstanceHierarchyDetails.cpp.obj",
+			"SGFToolsEditor.cpp.obj"
+		]
+	}
+}
