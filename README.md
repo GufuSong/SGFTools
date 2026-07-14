@@ -109,7 +109,7 @@ README
 
 
 
-##### &. GenericVFX
+##### &. GenericVFX 通用材质模块
 
 > 通用 shader 概述 :
 >
@@ -198,7 +198,8 @@ README
   - `5_VMask` :  V方向遮罩 .
 - `Center Point && Radial && Hardness &&SphereMask` 
 
-##### &. SequenceFrame 
+##### &. SequenceFrame 序列帧播放模块
+
 
 
 
