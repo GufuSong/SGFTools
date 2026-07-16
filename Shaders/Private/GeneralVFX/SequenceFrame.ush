@@ -1,6 +1,7 @@
 // Shared sequence frame helpers.
 
 
+
 struct Str_SGFSequenceFrame
 {
     float TimeFrame(float Time,

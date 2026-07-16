@@ -102,10 +102,11 @@ README
 
 
 
-##### &. 010_BASESETTING
+##### &. 010_BASESETTING 选择Shader类型
 
 - `GenericVFX` :  启用通用特效Shader ;
 - `SequenceFrame` :  启用序列帧Shader ;
+- `SimpleShader` :  使用简单Shader ,  适合制作简单效果 .
 
 
 
@@ -197,6 +198,48 @@ README
   - `4_UMask` :  U 方向遮罩 .
   - `5_VMask` :  V方向遮罩 .
 - `Center Point && Radial && Hardness &&SphereMask` 
+
+
+
+###### 170_Opacity 透明度
+
+>全局透明度调整 .
+
+- `Enable Fade Mask` :  启用交接淡化 ?
+- `Opacity_Adjust` :  透明度调整 .
+- `OpacityBasedFade_DistanceA/B` :  淡化距离 .
+
+
+
+###### 180_Sqecular 高光
+
+>高光提取 ,  可以令纹理变的更精致 .
+
+- `SelectAlgoritmMod_Specular` :  选择高光提取模式 .
+- `Threshold&Knee_Specular` :  
+	- `Threshold_Mask` :  高光范围调增_遮罩 .
+	- `Knee_Mask` :  高光软硬调整_遮罩 .
+	- `Threshold_Tex` :  高光范围调增_贴图 .
+	- `Knee_Tex` :  高光软硬调整_贴图 .
+
+- `TexAdjust_Specular` :  纹理常量调整 .
+- `TexColor_Specular` :  纹理颜色调整 .
+
+
+
+###### 190_MeshFresnel 模型菲尼尔
+
+>本材质的MeshFresnel使用一张 Mask影响菲尼尔纹理 .
+
+- `Invert_Fresnel` :  是否反转菲尼尔信息 .
+- `RangeAdjust_Fresnel` :  菲尼尔范围基础调整 .
+- `Color_Fresnel` :  菲尼尔颜色 .
+- ``
+
+
+
+
+
 
 ##### &. SequenceFrame 序列帧播放模块
 

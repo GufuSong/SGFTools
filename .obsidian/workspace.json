@@ -185,6 +185,9 @@
       "bases:新建数据库": false
     }
   },
-  "active": "75f7a63a83a1ff71",
-  "lastOpenFiles": []
+  "active": "379cb6f71ea62c1c",
+  "lastOpenFiles": [
+    "Shaders/Private/GeneralVFX/BaseGeneralVFX.ush",
+    "Shaders/Private/GeneralVFX/新建 Text Document.txt"
+  ]
 }
